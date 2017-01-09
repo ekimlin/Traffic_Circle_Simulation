@@ -3,24 +3,10 @@ Title:			traffic_circle.c
 Author: 		Emma Kimlin
 Created on:		December 12th, 2016
 Description: 	Simulate traffic in a traffic circle given the mean arrival times and the probability
-				that a car entering at one entrance will exit at a given exit.  
-Purpose:		Practice Open MPI programming and design. 
-Usage: 			Usage: mpirun -np <number of processors> traffic <input-parameter-file> [max number time steps]
-					where:
-					 <number of processors> refers to how many processors this program will run on and
-						therefore how many processes MPI will create.
-					 <input_parameter-file> is a text file that holds a 5x4 matrix of numbers where the 
-					 	first line holds 4 integers that refers to the The first row holds mean arrival 
-					 	times for the North, East South and West entrances, respectively. The remaining 
-					 	4 rows hold the probabilities that a car that enters at one entrance will exit 
-					 	at another. Each of the last 4 rows sum to 1.
-					 <max number of time steps> is an optional argument to indicate how many times time
-					 	steps this program will loop through, even if steady state is not reached before
-					 	the max numbers of time steps have executed. 
-
+		that a car entering at one entrance will exit at a given exit.  
+Purpose:	Practice Open MPI programming and design. 
+Usage: 		Usage: mpirun -np <number of processors> traffic <input-parameter-file> [max number time steps]
 Build With: 	make
-
-Modifications:
 ******************************************************************************************************/
 #include <mpi.h>
 #include <stdio.h>
@@ -30,28 +16,28 @@ Modifications:
 #include <errno.h>
 #include <limits.h>
 
-#define ROOT 0 						/* Process ID 															*/
-#define EPSILON .000005				/* Used during float comparison 										*/
-#define WINDOW_SIZE 100				/* Number of iterations over which average queue size is determined.    */
-#define AVG_QUEUE_DIFFERENCE 50      /* If the difference between consecutive average queue sizes falls
- 										below this number, traffic circle has reached steady state. 		*/
+#define ROOT 0 				/* Process ID 								*/
+#define EPSILON .000005			/* Used during float comparison 					*/
+#define WINDOW_SIZE 100			/* Number of iterations over which average queue size is determined.    */
+#define AVG_QUEUE_DIFFERENCE 50     	/* If the difference between consecutive average queue sizes falls
+ 					below this number, traffic circle has reached steady state. 		*/
 
 /* 
  * @entrance: the entrance where the car is entering the traffic circle
  * Pre-condition: A car has arrived at the traffic circle and is ready to enter. 
  * Post-condition: A car has entered the traffic circle at this entrance and the exit
- * 					toward which this car is headed is decided. The exit is stored in 
- *					transition probabilities. 
+ * 		toward which this car is headed is decided. The exit is stored in 
+ *		transition probabilities. 
 */
 int carEntersTrafficCircle(int entrance,  double transition_probabilities[16], int* errval);
 /*
  * @filename refers to a text file containing a matrix with 4 columns and 5 rows. The first row 
- *			holds mean arrival times for the North, East South and West entrances, respectively. 
- *			The remaining 4 rows hold the probabilities that a car that enters at one entrance 
- *			will exit at another. Each row sums to 1.
+ *		holds mean arrival times for the North, East South and West entrances, respectively. 
+ *		The remaining 4 rows hold the probabilities that a car that enters at one entrance 
+ *		will exit at another. Each row sums to 1.
  * Post-condition: Transition_probabilities holds the probabilites linearly such that indices 0-3 hold 
- * 			the values in the 2nd row, 4-7 hold that values in the 3rd row, and so on. The first row
- *			is stored in mean_arrivals. 
+ * 		the values in the 2nd row, 4-7 hold that values in the 3rd row, and so on. The first
+ *		row is stored in mean_arrivals. 
 */
 void read_input_matrix (char *filename, double transition_probabilities[16], double mean_arrivals[4], 
                                                                                         int* errval);
@@ -68,85 +54,85 @@ void generateExponentialParameters(double mean_arrival_times[4], double arrival_
  * @time_step_count is the total number of iterations or time_steps since start
  * @avg_queue_size holds the previous window's average queue sizes, if this is not the fist window. 
  * Post-condition: If this is the first window, avg_queue_size is populated with the average queue sizes 
- *			for this window and the function returns 0. 
- *			If this is not the first window, the average queue sizes of this window are calculated and compared to the
- *			last window to see what the difference is between them. If the difference is not greater than
- *			AVG_QUEUE_DIFFERENCE, the function returns 1. Otherwise returns 0. Either way, queue_accum is 
- *			reset to 0.
- * 			If this was called before window is complete, return 0.		
+ *		for this window and the function returns 0. 
+ *		If this is not the first window, the average queue sizes of this window are calculated and 
+ *		compared to the last window to see what the difference is between them. If the difference is 
+ *		not greater than AVG_QUEUE_DIFFERENCE, the function returns 1. Otherwise returns 0. Either 
+ * 		way, queue_accum is reset to 0.
+ * 		If this was called before window is complete, return 0.		
 */																					
 int checkIfReachedSteadyState(double avg_queue_size[4], int queue_accum_in_window[4], int time_step_count, 
 															int* error, int reached_steady_state_bool[4]);
 
 int main(int argc, char* argv[]) {
-	int id; 				   		  /* Rank of executing process 											 */
-	int p; 					   		  /* Number of processes 												 */
+	int id; 			 /* Rank of executing process 						 */
+	int p; 				 /* Number of processes 						 */
 	int traffic_circle1[16];		 
 	int traffic_circle2[16]; 							 
 	int* traffic_circle_p = traffic_circle1; 
-									 /* Each element represents segment of traffic circle that is either
-							  		    empty or holds one car. If traffic_circle[i] = -1, segment is empty.
-							   			Otherwise circle[i] containts integer that represents the car's exit */
+					 /* Each element represents segment of traffic circle that is either
+					    empty or holds one car. If traffic_circle[i] = -1, segment is empty.
+					    Otherwise circle[i] containts integer that represents the car's exit */
 	int* advanced_traffic_circle_p = traffic_circle2;
-									 /* Stores the state of the traffic circle after all cars in the circle 	 
-										have advanced in the current time step. 							 */
-	int arrival[4] = {0}; 		     /* Boolean array. arrival[i] = 1 when a car arrives at an entrance 	 */
-	double time_til_next_arrival[4]; /* Stores the time until the next car arrives at each entrance. 		 */
-	int arrival_count[4] = {0};	     /* Contains total number of arrivals at each entrance across all 
-										processes															 */
+					 /* Stores the state of the traffic circle after all cars in the circle 	 
+					    have advanced in the current time step. 			 	 */
+	int arrival[4] = {0}; 		 /* Boolean array. arrival[i] = 1 when a car arrives at an entrance 	 */
+	double time_til_next_arrival[4]; /* Stores the time until the next car arrives at each entrance. 	 */
+	int arrival_count[4] = {0};	 /* Contains total number of arrivals at each entrance across all 
+					    processes								 */
 	int local_arrival_count[4] = {0};/* Contains total number of arrivals at each entrance for this process  */
-	int wait_count[4] = {0}; 		 /* Number of cars that could not enter circle immediately for each 
-										entrance over all processes											 */
+	int wait_count[4] = {0}; 	 /* Number of cars that could not enter circle immediately for each 
+					    entrance over all processes						 */
 	int local_wait_count[4] = {0}; 	 /* Number of cars that could not enter circle immediately for each 
-										entrance for this process. 											 */
-	int queue[4] = {0};			     /* How many cars are waiting to enter traffic circle at each entrance
-										during this time step.											     */
-	int queue_accum[4] = {0}; 	     /* Runnning total of values in queue over all time steps for all 
-										processes															 */
+					    entrance for this process. 						 */
+	int queue[4] = {0};		 /* How many cars are waiting to enter traffic circle at each entrance
+					    during this time step.					     	 */
+	int queue_accum[4] = {0}; 	 /* Runnning total of values in queue over all time steps for all 
+					    processes								 */
 	int local_queue_accum[4] =  {0}; /* Running total of values in queue over all time steps for this 
-										process 															 */
+					    process 								 */
 	int queue_accum_in_window[4] = {0}; /* Running total of values in queue within current window for all
-										processes		 													 */
+					       processes							 */
 	int local_queue_accum_in_window[4] = {0}; /* Running total of values in queue within current window for
-										this process.													 	 */
+						this process.							 */
 	double avg_queue_size[4] = {0};  /* Stores the average queue size at each entrance over a window of 
-										WINDOW_SIZE iterations												 */
+					    WINDOW_SIZE iterations						 */
 	double mean_arrival_time[4];     /* The probability of a car arriving at an entrance during a particular 
-										time step is a random variable from an exponential distribution with 
-										mean m. This array holds the mean time between arrival at each 
-										entrance. 															 */
+					    time step is a random variable from an exponential distribution with 
+					    mean m. This array holds the mean time between arrival at each 
+					    entrance. 								 */
 	double arrival_time_exponential_parameter[4]; 
-									 /* Holds the exponential parameter, calculated as the inverse of the
-										mean arrival time, for each entrance. To be used when deciding if
-										a car has arrived or not. 											 */
+					/* Holds the exponential parameter, calculated as the inverse of the
+					   mean arrival time, for each entrance. To be used when deciding if
+					   a car has arrived or not.						 */
 	double transition_probabilities[16];  
-									 /* Store probabilities that a car entering at entrance i will
-										exit at exit j. 											 		 */
-	int reached_steady_state[4]; 	 /* For each entrance, indicates whether entrance has reached steady 
-										state. Must all be set to 1 in order for reached_steady_state_bool 
-										to be true								 							 */
+					/* Store probabilities that a car entering at entrance i will
+					   exit at exit j. 					 		 */
+	int reached_steady_state[4]; 	/* For each entrance, indicates whether entrance has reached steady 
+					   state. Must all be set to 1 in order for reached_steady_state_bool 
+					   to be true			 					 */
 	int reached_steady_state_bool = 0;/* Boolean to indicate whether or not the traffic circle has reached 
-										a steady state (defined by the changed in the average queue size) 	 */
-	int time_step_count = 0; 		 /* Stores total number of iterations of the while loop across all 
-										processes 															 */
+					a steady state (defined by the changed in the average queue size) 	 */
+	int time_step_count = 0; 	/* Stores total number of iterations of the while loop across all 
+					   processes 								 */
 	int local_time_step_count = 0;
 	int error = 0; 
 	double random_num;
 	int* swap_helper;
 	int max_time_steps = 100000;    /* Maximum number of iterations the while loop runs for. Default to 100k
-										and will update if user provided 2nd command line argument 			 */
+					   and will update if user provided 2nd command line argument 		 */
 
 	MPI_Init(&argc, &argv);
 	MPI_Comm_rank(MPI_COMM_WORLD, &id);
 	MPI_Comm_size(MPI_COMM_WORLD, &p);
-	/* CHECK AND DISTRIBUTE USER INPUT */
+/* CHECK AND DISTRIBUTE USER INPUT */
     if (id == p-1) {
         if ((argc < 2) || (argc > 3)) { //Check number of arguments user provided
             printf("Usage: traffic_circle <input-parameter-file> [max number time steps] \n");
             error = 1;
         } else 
             read_input_matrix (argv[1], transition_probabilities,  
-                                        mean_arrival_time, &error); //Read matrix from file 
+                                       mean_arrival_time, &error); //Read matrix from file 
         if (error != 1)
         	generateExponentialParameters(mean_arrival_time, arrival_time_exponential_parameter, &error); 
         if (error != 1 && argc == 3) {
@@ -197,7 +183,8 @@ int main(int argc, char* argv[]) {
 			/* If a car is one space before the exit that is its destination exit, remove the car from
 				 advanced_traffic_circle in the next time segment.   */
 			if ( ((i == 14) && (*(traffic_circle_p + i) == 0)) || (( i == 2) && (*(traffic_circle_p + i) == 1)) ||
-				((i == 6) && (*(traffic_circle_p + i) == 2)) || ((i == 10) && (*(traffic_circle_p + i) == 3)) ) {
+				((i == 6) && (*(traffic_circle_p + i) == 2)) || 
+			    	((i == 10) && (*(traffic_circle_p + i) == 3)) ) {
 				*(advanced_traffic_circle_p + i + 1) = -1;
 			}
 			/* If a car is not one before an exit, move it forward 1 segment  */
