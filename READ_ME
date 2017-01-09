@@ -1,0 +1,33 @@
+Traffic_Circle_Simulator simulates traffic in a traffic circle given the mean arrival times and the probability that a car entering at 	 one entrance will exit at a given exit. The user must provide a 	matrix stored in a text file with this information at execution. 	The program uses this information to determine the probability 	that a car must wait at each of 4 entrances (North, South, East and West) as well as the average size of the queue of cars at each entrance. 
+
+Execution ends when traffic circle has reached "steady state" at each entrance. If <max num time steps> is provided, the program will exit once it has executed that number of time steps, even if steady state has not been reached. A steady state is reached when the change in the average queue size for each entrance has not changed more than some threshold compared to the last calculation of the average queue size. This threshold (AVG_QUEUE_DIFFERENCE) and how long between calculation of average queue size (WINDOW_SIZE) are global variables that can be played around with as the programmer sees fit. 
+
+It uses the Open MPI API binded to C to parallelize this task. Each process keeps track of its own traffic circle, including 			tracking wait times and queue lengths at each entrance. At the 		end, the "local" data of each task is combined with the local 	
+data of all others processes to find the total queue lengths, 
+wait times and how many cars arrived at each entrance. 
+
+BUILD WITH: make 
+	If running on Linux, modify makefile flags to include -lm 
+
+USAGE: 	
+	 mpirun -np <number of processors> traffic <input-parameter-file> 			[max number time steps]
+		where:
+		<number of processors> refers to how many processors this 		program will run on and therefore how many processes MPI 	 will create.
+		 <input_parameter-file> is a text file that holds a 5x4 		matrix of numbers where the first line holds 4 integers 	that refers to the The first row holds mean arrival 
+			 times for the North, East South and West entrances, respectively. The remaining 4 rows hold the probabilities that a car that enters at one entrance will exit at another. Each of the last 4 rows sum to 1.
+			 The columns of the last 4 rows are in order N E S W and the rows from top to bottom are in the same order. 
+		<max number of time steps> is an optional argument to 			indicate how many times time steps this program will 		loop through, even if steady state is not reached before
+			the max numbers of time steps have executed. 
+
+	An example of valid contents of a text file provided as input to this program is: 
+
+	 1 1 2 2
+	.1 .2 .3 .4
+	.5 2 .7 .5
+	.25 .25 .25 .25
+	.5 .4 .1 0
+
+	The first line: 1 1 1 1 means that a car will arrive at each time step at the North and East entrances and a car will arrive at every other time step at the South and West entrances.
+	The probability that a car entering at the West entrance will exit at the North entrance is .5. The probability that a car entering at the East entrance will exit at the South entrance is .7
+	Note that .1 + .2 + .3 + .4 = 1. The last 4 rows will each all sum to 1. 
+
